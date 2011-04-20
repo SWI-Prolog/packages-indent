@@ -34,11 +34,41 @@ indent_streams(In, Out) :-
 indent(Clause, _, _) :-
 	clause_term(Clause, end_of_file), !.
 indent(Clause, In, Out) :-
-	indent_1(Out, Clause),
-	read_src(In, Cl2),
-	indent(Cl2, In, Out).
+	read_predicate(Clause, Clauses, Next, In),
+	indent_predicate(Out, Clauses),
+	indent(Next, In, Out).
 
-indent_1(Out, Clause) :-
+%%	read_predicate(+Clause0, -Clauses, -NextClause, +In) is det.
+%
+%	Read the next predicate from the source
+
+read_predicate(Clause0, [Clause0|Rest], Next, In) :-
+	read_src(In, Clause1),
+	(   same_pred(Clause0, Clause1)
+	->  read_predicate(Clause1, Rest, Next, In)
+	;   Next = Clause1,
+	    Rest = []
+	).
+
+same_pred(Clause1, Clause2) :-
+	clause_pred(Clause1, PI1),
+	clause_pred(Clause2, PI2),
+	canonical_pi(PI1, PI),
+	canonical_pi(PI2, PI).
+
+clause_pred(Clause, PI) :-
+	clause_term(Clause, Term),
+	term_pi(Term, PI).
+
+%%	indent_predicate(+Out, +Clauses) is det.
+%
+%	Indent a single predicate.
+
+indent_predicate(Out, Clauses) :-
+	maplist(indent_clause(Out), Clauses),
+	format(Out, '~n', []).
+
+indent_clause(Out, Clause) :-
 	clause_layout(Clause, Layout),
 	arg(1, Layout, StartClause),
 	clause_comment(Clause, Comment),
@@ -73,4 +103,39 @@ read_src(In, Clause) :-
 		      layout(Layout),
 		      comment(Comment)
 		    ], Clause).
+
+%%	term_pi(+Term, -PI)
+
+term_pi(Head :- _, PI) :- !,
+	head_pi(Head, PI).
+term_pi(Head --> _, PI) :- !,
+	dcg_head_pi(Head, PI).
+term_pi(Head, PI) :-
+	head_pi(Head, PI).
+
+head_pi(M:Head, M:PI) :- !,
+	plain_head_pi(Head, PI).
+head_pi(Head, PI) :-
+	plain_head_pi(Head, PI).
+
+dcg_head_pi(M:Head, M:PI) :-
+	dcg_plain_head_pi(Head, PI).
+dcg_head_pi(Head, PI) :-
+	dcg_plain_head_pi(Head, PI).
+
+plain_head_pi(Head, Name/Arity) :-
+	functor(Head, Name, Arity).
+dcg_plain_head_pi(Head, Name//Arity) :-
+	functor(Head, Name, Arity).
+
+canonical_pi(M:PI0, M:PI) :- !,
+	canonical_pi(PI0, PI).
+canonical_pi(Name//Arity0, Name/Arity) :- !,
+	Arity is Arity0 + 2.
+canonical_pi(PI, PI).
+
+
+
+
+
 
