@@ -2,10 +2,31 @@
 	  [ indent/2			% +In, +Out
 	  ]).
 :- use_module(library(prolog_source)).
+:- use_module(library(listing)).
 :- use_module(library(record)).
 
 /** <module> Prolog indent utility
 
+This module implements reformatting of Prolog  source code comparable to
+the Unix indent(1) utility for C.  It   operates  by reading the source,
+using portray_clause/2 for formatting  the   result  and  re-inserts the
+comments.
+
+One of the design goals of this is module   is  to use the same code for
+refactoring operations, such as changing   the arguments (order, delete,
+add) of predicates. In that case we   read  the source, transform it and
+write it out using the same layout logic.
+
+@tbd	Reformat comments.  Maybe we can use the PlDoc Wiki parser here
+	to extract the structure?
+@tbd	Re-insert comments inside the clause.  This is probably the
+	hardest part because the comment must be between the same two
+	tokens as where it appeared originally.  We should also distingish
+	comments aligned with the code and positioned right of the code.
+@tbd	Preserve/insert special notation.  Some examples:
+
+	    - Lists that must be written as "strings"
+	    - Numbers written in different notations (including 0'x)
 */
 
 %%	indent(+FileIn, -FileOut) is det.
@@ -82,6 +103,8 @@ leading_comments([], _, [], _) :- !.
 leading_comments([Pos-Comment|Rest], StartClause, RestComments, Out) :-
 	stream_position_data(char_count, Pos, StartComment),
 	StartComment < StartClause, !,
+	stream_position_data(line_position, Pos, LinePos),
+	indent_to_column(Out, LinePos),
 	format(Out, '~s~n~n', [Comment]),
 	leading_comments(Rest, StartClause, RestComments, Out).
 leading_comments(Comments, _, Comments, _).
@@ -134,6 +157,28 @@ canonical_pi(Name//Arity0, Name/Arity) :- !,
 	Arity is Arity0 + 2.
 canonical_pi(PI, PI).
 
+%%	indent_to_column(+Out, +Indent)
+%
+%	Indent to column Indent. Uses   the setting listing:tab_distance
+%	to determine the mapping between tabs and spaces.
+
+indent_to_column(Out, N) :-
+	nl(Out),
+	setting(listing:tab_distance, D),
+	(   D =:= 0
+	->  tab(Out, N)
+	;   Tab is N // D,
+	    Space is N mod D,
+	    put_tabs(Out, Tab),
+	    tab(Out, Space)
+	).
+
+put_tabs(Out, N) :-
+	N > 0, !,
+	put(Out, 0'\t),
+	NN is N - 1,
+	put_tabs(Out, NN).
+put_tabs(_, _).
 
 
 

@@ -1,0 +1,10 @@
+---+ Deal with comments and different formatting
+
+One of the options is to process the clause with the term-positions and comments
+to `annotate' terms. Here are some examples
+
+	'$annot'(List, string).		% "hello"
+	'$annot'(Code, char_code).	% 0'x
+	'$annot'(Code, hex).		% 0x12
+	'$annot'(Code, base(6)).	% 6'12
+	'$annot'(Token, comment(Comment, Indent))
