@@ -2,6 +2,7 @@
 	  [ indent/2			% +In, +Out
 	  ]).
 :- use_module(library(prolog_source)).
+:- use_module(library(record)).
 
 /** <module> Prolog indent utility
 
@@ -20,21 +21,32 @@ indent_sf(In, FileOut) :-
 			   indent_streams(In, Out),
 			   close(Out)).
 
+:- record
+	clause(term,
+	       variables,
+	       layout,
+	       comment).
+
 indent_streams(In, Out) :-
-	read(In, Clause, Vars, Layout, Comment),
-	indent(Clause, Vars, Layout, Comment, In, Out).
+	read_src(In, Clause),
+	indent(Clause, In, Out).
 
-indent(end_of_file, _, _, _, _, _) :- !.
-indent(Clause, Vars, Layout, Comment, In, Out) :-
-	indent_1(Out, Clause, Vars, Layout, Comment),
-	read(In, Cl2, V2, L2, Cmt2),
-	indent(Cl2, V2, L2, Cmt2, In, Out).
+indent(Clause, _, _) :-
+	clause_term(Clause, end_of_file), !.
+indent(Clause, In, Out) :-
+	indent_1(Out, Clause),
+	read_src(In, Cl2),
+	indent(Cl2, In, Out).
 
-indent_1(Out, Clause, Vars, Layout, Comment) :-
+indent_1(Out, Clause) :-
+	clause_layout(Clause, Layout),
 	arg(1, Layout, StartClause),
+	clause_comment(Clause, Comment),
 	leading_comments(Comment, StartClause, _RestComments, Out),
+	clause_variables(Clause, Vars),
 	bind_vars(Vars),
-	portray_clause(Out, Clause).
+	clause_term(Clause, Term),
+	portray_clause(Out, Term).
 
 leading_comments([], _, [], _) :- !.
 leading_comments([Pos-Comment|Rest], StartClause, RestComments, Out) :-
@@ -50,9 +62,15 @@ bind_vars([Name=Var|T]) :-
 	Var = '$VAR'(Name),
 	bind_vars(T).
 
-read(In, Clause, Vars, Layout, Comment) :-
-	prolog_read_source_term(In, Clause, _Expanded,
+read_src(In, Clause) :-
+	prolog_read_source_term(In, Term, _Expanded,
 				[ variable_names(Vars),
 				  subterm_positions(Layout),
 				  comments(Comment)
-				]).
+				]),
+	make_clause([ term(Term),
+		      variables(Vars),
+		      layout(Layout),
+		      comment(Comment)
+		    ], Clause).
+
