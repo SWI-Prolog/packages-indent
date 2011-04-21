@@ -4,6 +4,7 @@
 :- use_module(library(prolog_source)).
 :- use_module(library(listing)).
 :- use_module(library(record)).
+:- use_module(library(apply)).
 
 /** <module> Prolog indent utility
 
@@ -88,15 +89,20 @@ indent_predicate(Out, Clauses) :-
 	format(Out, '~n', []).
 
 indent_clause(Out, Clause0) :-
-	annotate_clause(Clause0, Clause),
-	clause_layout(Clause, Layout),
-	arg(1, Layout, StartClause),
-	clause_comment(Clause, Comment),
-	leading_comments(Comment, StartClause, _RestComments, Out),
+	leading_comments(Clause0, Clause1, Out),
+	annotate_clause(Clause1, Clause),
 	clause_variables(Clause, Vars),
 	bind_vars(Vars),
 	clause_term(Clause, Term),
 	portray_clause(Out, Term, [portray_goal(indent_portray)]).
+
+leading_comments(ClauseIn, ClauseOut, Out) :-
+	clause_layout(ClauseIn, Layout),
+	arg(1, Layout, StartClause),
+	clause_comment(ClauseIn, Comment),
+	leading_comments(Comment, StartClause, RestComments, Out),
+	set_comment_of_clause(RestComments, ClauseIn, ClauseOut).
+
 
 %%	leading_comments(+Comments, +StartClause, -InClauseComment, +Out)
 %
@@ -143,15 +149,18 @@ annotate(Number, Pos, _, Source, '$listing'(Number, number(Text))) :-
 	number(Number), !,
 	source_text(Source, Pos, Text).
 annotate(Primitive, _-_, _, _, Primitive) :- !.
-annotate({}(Arg), brace_term_position(_,_,ArgPos), Comments, Source, TermOut) :-
+annotate({}(Arg), brace_term_position(F,T,ArgPos), Comments, Source, TermOut) :-
 	!,
-	annotate(Arg, ArgPos, Comments, Source, TermOut).
-annotate(List, list_position(_,_,Elms,Tail), Comments, Source, ListOut) :- !,
-	annotate_list(List, Elms, Tail, Comments, Source, ListOut).
-annotate(Term, term_position(_,_,_,_,ArgPos), Comments, Source, TermOut) :-
+	include(comment_in_range(F-T), Comments, EmbeddedComments),
+	annotate(Arg, ArgPos, EmbeddedComments, Source, TermOut).
+annotate(List, list_position(F,T,Elms,Tail), Comments, Source, ListOut) :- !,
+	include(comment_in_range(F-T), Comments, EmbeddedComments),
+	annotate_list(List, Elms, Tail, EmbeddedComments, Source, ListOut).
+annotate(Term, term_position(F,T,_,_,ArgPos), Comments, Source, TermOut) :-
 	functor(Term, Name, Arity),
 	functor(TermOut, Name, Arity),
-	annotate_args(1, Term, ArgPos, Comments, Source, TermOut).
+	include(comment_in_range(F-T), Comments, EmbeddedComments),
+	annotate_args(1, Term, ArgPos, EmbeddedComments, Source, TermOut).
 
 annotate_list([H|T], [PH|PT], TP, Comments, Source, [AH|AT]) :- !,
 	annotate(H, PH, Comments, Source, AH),
@@ -164,9 +173,41 @@ annotate_args(_, _, [], _, _, _) :- !.
 annotate_args(I, Term, [PH|PT], Comments, Source, TermOut) :-
 	arg(I, Term, A0),
 	arg(I, TermOut, A),
-	annotate(A0, PH, Comments, Source, A),
+	partition(comment_in_range(PH), Comments, A0Comments, RComments),
+	annotate(A0, PH, A0Comments, Source, A1),
+	(   PT = [PR|_]
+	->  split_comments(RComments, PR, Now, RestComments)
+	;   Now = RComments,
+	    RestComments = []
+	),
+	tag_comment(Now, A1, A),
 	succ(I, I2),
-	annotate_args(I2, Term, PT, Comments, Source, TermOut).
+	annotate_args(I2, Term, PT, RestComments, Source, TermOut).
+
+tag_comment([], Term, Term) :- !.
+tag_comment(Comments, Term, '$comment'(Term, Comments)).
+
+comment_in_range(Range, Pos-_) :-
+	arg(1, Range, From),
+	arg(2, Range, To),
+	stream_position_data(char_count, Pos, Start),
+	between(From, To, Start).
+
+%%	split_comments(+Comments, +Pos, -Before, -After)
+%
+%	Split the set of Comments in a subset Before Pos and After Pos.
+
+split_comments([], _, [], []).
+split_comments([C0|CT], P, Before, After) :-
+	C0 = Pos-_,
+	stream_position_data(char_count, Pos, StartComment),
+	arg(1, P, Here),
+	(   StartComment < Here
+	->  Before = [C0|BT],
+	    split_comments(CT, P, BT, After)
+	;   After = [C0|CT],
+	    Before = []
+	).
 
 
 %%	source_text(+Source, +Pos, -Text:atom) is det.
