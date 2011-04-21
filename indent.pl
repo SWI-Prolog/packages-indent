@@ -99,6 +99,14 @@ indent_clause(Out, Clause) :-
 	clause_term(Clause, Term),
 	portray_clause(Out, Term).
 
+%%	leading_comments(+Comments, +StartClause, -InClauseComment, +Out)
+%
+%	Emit the comments that preceed the clause.
+%
+%	@param	StartClause is the character offset that starts the
+%		clause
+%	@tbd	(optionally) reformat the comments
+
 leading_comments([], _, [], _) :- !.
 leading_comments([Pos-Comment|Rest], StartClause, RestComments, Out) :-
 	stream_position_data(char_count, Pos, StartComment),
@@ -114,6 +122,12 @@ bind_vars([]).
 bind_vars([Name=Var|T]) :-
 	Var = '$VAR'(Name),
 	bind_vars(T).
+
+%%	read_src(+In, -Clause) is det.
+%
+%	Read the next  clause  from  the   input.  Clause  is  a  clause
+%	`record', containing the term, its   variables,  its layout info
+%	and comment.
 
 read_src(In, Clause) :-
 	prolog_read_source_term(In, Term, _Expanded,
