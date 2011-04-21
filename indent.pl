@@ -23,10 +23,6 @@ write it out using the same layout logic.
 	hardest part because the comment must be between the same two
 	tokens as where it appeared originally.  We should also distingish
 	comments aligned with the code and positioned right of the code.
-@tbd	Preserve/insert special notation.  Some examples:
-
-	    - Lists that must be written as "strings"
-	    - Numbers written in different notations (including 0'x)
 */
 
 %%	indent(+FileIn, -FileOut) is det.
@@ -43,10 +39,12 @@ indent_sf(In, FileOut) :-
 			   close(Out)).
 
 :- record
-	clause(term,
-	       variables,
-	       layout,
-	       comment).
+	clause(term,			% The term itself
+	       variables,		% its variables
+	       input,			% source-stream
+	       start,			% stream-position at start
+	       layout,			% complete layout
+	       comment).		% list of comments
 
 indent_streams(In, Out) :-
 	read_src(In, Clause),
@@ -89,7 +87,8 @@ indent_predicate(Out, Clauses) :-
 	maplist(indent_clause(Out), Clauses),
 	format(Out, '~n', []).
 
-indent_clause(Out, Clause) :-
+indent_clause(Out, Clause0) :-
+	annotate_clause(Clause0, Clause),
 	clause_layout(Clause, Layout),
 	arg(1, Layout, StartClause),
 	clause_comment(Clause, Comment),
@@ -97,7 +96,7 @@ indent_clause(Out, Clause) :-
 	clause_variables(Clause, Vars),
 	bind_vars(Vars),
 	clause_term(Clause, Term),
-	portray_clause(Out, Term).
+	portray_clause(Out, Term, [portray_goal(indent_portray)]).
 
 %%	leading_comments(+Comments, +StartClause, -InClauseComment, +Out)
 %
@@ -123,6 +122,113 @@ bind_vars([Name=Var|T]) :-
 	Var = '$VAR'(Name),
 	bind_vars(T).
 
+%%	annotate_clause(+ClauseIn, +In, -ClauseOut) is det.
+%
+%	Annotate ClauseIn with additional information such as particular
+%	encodings of numbers or  the  use   of  strings.  This also adds
+%	comments as annotations to the clause structure.
+
+annotate_clause(ClauseIn, ClauseOut) :-
+	clause_term(ClauseIn, Term),
+	clause_layout(ClauseIn, Layout),
+	clause_comment(ClauseIn, Comments),
+	clause_source(ClauseIn, Source),
+	annotate(Term, Layout, Comments, Source, TermOut),
+	set_term_of_clause(TermOut, ClauseIn, ClauseOut).
+
+annotate(String, Pos, _, Source, '$listing'(String, string(Text))) :-
+	Pos = string_position(_,_), !,
+	source_text(Source, Pos, Text).
+annotate(Number, Pos, _, Source, '$listing'(Number, number(Text))) :-
+	number(Number), !,
+	source_text(Source, Pos, Text).
+annotate(Primitive, _-_, _, _, Primitive) :- !.
+annotate({}(Arg), brace_term_position(_,_,ArgPos), Comments, Source, TermOut) :-
+	!,
+	annotate(Arg, ArgPos, Comments, Source, TermOut).
+annotate(List, list_position(_,_,Elms,Tail), Comments, Source, ListOut) :- !,
+	annotate_list(List, Elms, Tail, Comments, Source, ListOut).
+annotate(Term, term_position(_,_,_,_,ArgPos), Comments, Source, TermOut) :-
+	functor(Term, Name, Arity),
+	functor(TermOut, Name, Arity),
+	annotate_args(1, Term, ArgPos, Comments, Source, TermOut).
+
+annotate_list([H|T], [PH|PT], TP, Comments, Source, [AH|AT]) :- !,
+	annotate(H, PH, Comments, Source, AH),
+	annotate_list(T, PT, TP, Comments, Source, AT).
+annotate_list([], [], none, _, _, []) :- !.
+annotate_list(Last, _, TP, Comments, Source, ALast) :-
+	annotate(Last, TP, Comments, Source, ALast).
+
+annotate_args(_, _, [], _, _, _) :- !.
+annotate_args(I, Term, [PH|PT], Comments, Source, TermOut) :-
+	arg(I, Term, A0),
+	arg(I, TermOut, A),
+	annotate(A0, PH, Comments, Source, A),
+	succ(I, I2),
+	annotate_args(I2, Term, PT, Comments, Source, TermOut).
+
+
+%%	source_text(+Source, +Pos, -Text:atom) is det.
+%
+%	Get the original source text for the range Pos.
+
+source_text(Offset-Source, Pos, Text) :-
+	arg(1, Pos, Start),
+	arg(2, Pos, End),
+	S is Start - Offset,
+	L is End - Offset - S,
+	sub_atom(Source, S, L, _, Text).
+
+%%	clause_source(+Clause, -Source) is det.
+%
+%	Read the source-text for Clause from the original input
+%
+%	@param	Source is a term Offset-Text, where Offset is the
+%		character position of the start and Text is an atom
+%		representing the clause-text.
+
+clause_source(ClauseIn, Start-Text) :-
+	clause_input(ClauseIn, In),
+	setup_call_cleanup(stream_property(In, position(Here)),
+			   read_clause_text(ClauseIn, In, Start, Text),
+			   set_stream_position(In, Here)).
+
+read_clause_text(ClauseIn, In, StartCode, Text) :-
+	clause_start(ClauseIn, Start),
+	stream_position_data(char_count, Start, StartCode),
+	clause_layout(ClauseIn, Layout),
+	assertion(arg(1, Layout, StartCode)),
+	arg(2, Layout, End),
+	Count is End-StartCode,
+	set_stream_position(In, Start),
+	read_n_codes(Count, In, Codes),
+	atom_codes(Text, Codes).
+
+read_n_codes(N, In, [H|T]) :-
+	succ(N2, N), !,
+	get_code(In, H),
+	read_n_codes(N2, In, T).
+read_n_codes(_, _, []).
+
+%%	indent_portray(+Term)
+%
+%	Use a local portray hook that   allows us to format annotations.
+%	Note that for numbers,  strings,  etc.   we  can  choose between
+%	emitting  the  original  token   or    generating   a   caonical
+%	representation for the value.
+%
+%	@see '$put_quoted'/4 supports emitting escaped quoted strings.
+
+:- public
+	indent_portray/1.
+
+indent_portray('$listing'(_String, string(Text))) :-
+	write(Text).
+indent_portray('$listing'(_Number, number(Text))) :-
+	write(Text).
+
+
 %%	read_src(+In, -Clause) is det.
 %
 %	Read the next  clause  from  the   input.  Clause  is  a  clause
@@ -132,11 +238,14 @@ bind_vars([Name=Var|T]) :-
 read_src(In, Clause) :-
 	prolog_read_source_term(In, Term, _Expanded,
 				[ variable_names(Vars),
+				  term_position(Start),
 				  subterm_positions(Layout),
 				  comments(Comment)
 				]),
 	make_clause([ term(Term),
 		      variables(Vars),
+		      input(In),
+		      start(Start),
 		      layout(Layout),
 		      comment(Comment)
 		    ], Clause).
