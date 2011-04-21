@@ -262,12 +262,21 @@ read_n_codes(_, _, []).
 %	@see '$put_quoted'/4 supports emitting escaped quoted strings.
 
 :- public
-	indent_portray/1.
+	indent_portray/2.
 
-indent_portray('$listing'(_String, string(Text))) :-
+indent_portray('$listing'(_String, string(Text)), _Options) :-
 	write(Text).
-indent_portray('$listing'(_Number, number(Text))) :-
+indent_portray('$listing'(_Number, number(Text)), _Options) :-
 	write(Text).
+indent_portray('$comment'(Term, Comments), Options) :-
+	memberchk(priority(Pri), Options),
+	prolog_listing:pprint(current_output, Term, Pri, Options),
+	print_comments(Comments).
+
+print_comments([]).
+print_comments([_Pos-Comment|T]) :-
+	write(Comment),
+	print_comments(T).
 
 
 %%	read_src(+In, -Clause) is det.
